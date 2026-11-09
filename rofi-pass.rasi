@@ -1,0 +1,91 @@
+/* Theme for ~/.local/bin/rofi-pass: compact dark card in the GNOME Yaru-dark style. */
+* {
+    bg:       #242424;
+    surface:  #333333;
+    line:     #ffffff1f;
+    fg:       #f6f6f6;
+    fg-dim:   #f6f6f68c;
+    accent:   #e95420;
+    on-accent: #ffffff;
+
+    background-color: transparent;
+    text-color: @fg;
+    font: "Fira Sans 12";
+}
+
+window {
+    transparency: "real";
+    location: center;
+    anchor: center;
+    width: 520px;
+    padding: 12px;
+    border: 1px;
+    border-color: @line;
+    border-radius: 16px;
+    background-color: @bg;
+}
+
+mainbox {
+    spacing: 10px;
+    children: [ inputbar, listview, message ];
+}
+
+inputbar {
+    padding: 10px 14px;
+    spacing: 12px;
+    border-radius: 10px;
+    background-color: @surface;
+    children: [ prompt, entry ];
+}
+
+prompt {
+    font: "MesloLGS NF 13";
+    text-color: @accent;
+    vertical-align: 0.5;
+}
+
+entry {
+    placeholder: "Buscar senha…";
+    placeholder-color: @fg-dim;
+    vertical-align: 0.5;
+}
+
+listview {
+    lines: 7;
+    fixed-height: false;
+    dynamic: true;
+    scrollbar: false;
+    spacing: 2px;
+}
+
+element {
+    padding: 9px 12px;
+    border-radius: 8px;
+}
+
+element normal.normal, element alternate.normal {
+    background-color: transparent;
+    text-color: @fg;
+}
+
+element selected.normal {
+    background-color: @accent;
+    text-color: @on-accent;
+}
+
+element-text {
+    background-color: transparent;
+    text-color: inherit;
+    vertical-align: 0.5;
+    highlight: bold;
+}
+
+message {
+    padding: 0px 4px;
+}
+
+textbox {
+    font: "Fira Sans 9.5";
+    text-color: @fg-dim;
+    horizontal-align: 0.5;
+}

@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# Wayland (GNOME/Mutter) version. Pick a pass entry in rofi and paste its first line (the password)
+# into the focused window (Shift+Insert), or only copy it with Alt+C. Alt+N (or the last row) adds
+# an entry (name + password), Alt+R renames, Alt+D deletes after the name is typed back.
+# The clipboard is cleared after 30 s.
+# Recently used entries come first. Theme: rofi-pass.rasi (same folder)
+set -eu
+store="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+hist="${XDG_CACHE_HOME:-$HOME/.cache}/rofi-pass/history" # entry names only, never passwords
+clear_after=30
+
+theme="$(dirname "$(readlink -f "$0")")/rofi-pass.rasi" # theme lives next to the script
+
+notify() { notify-send -a Senhas -i dialog-password-symbolic -h int:transient:1 "$1" "$2" || true; }
+
+esc() { local s=${1//&/&amp;}; s=${s//</&lt;}; printf '%s' "${s//>/&gt;}"; } # for pango markup
+
+pretty() { printf '%s' "${1//\// › }"; } # trabalho/sankhya -> trabalho › sankhya
+
+center() { # Mutter places normal XWayland windows itself: move rofi to the middle of the primary monitor
+  local w g W H pid focused=0
+  for _ in $(seq 40); do w=$(xdotool search --onlyvisible --class rofi | head -n1); [ -n "$w" ] && break; sleep 0.05; done
+  [ -n "$w" ] || return 0
+  g=$(xrandr --listmonitors | awk '/\*/{print $3}') # e.g. 2560/590x1440/330+1080+261
+  [[ $g =~ ^([0-9]+)/[0-9]+x([0-9]+)/[0-9]+\+([0-9]+)\+([0-9]+)$ ]] || return 0
+  eval "$(xdotool getwindowgeometry --shell "$w")" # WIDTH, HEIGHT
+  wmctrl -i -r "$w" -b add,skip_taskbar,skip_pager # keep it out of the taskbar/Alt+Tab like an overlay
+  xdotool windowmove "$w" $((BASH_REMATCH[3] + (BASH_REMATCH[1] - WIDTH) / 2)) $((BASH_REMATCH[4] + (BASH_REMATCH[2] - HEIGHT) / 2))
+  # Normal windows do not close on focus loss like an overlay would: kill rofi once it had focus and lost it.
+  pid=$(xdotool getwindowpid "$w")
+  while xdotool getwindowgeometry "$w" >/dev/null 2>&1; do
+    if [ "$(xdotool getwindowfocus 2>/dev/null)" = "$w" ]; then focused=1
+    elif [ "$focused" = 1 ]; then kill "$pid" 2>/dev/null; return 0; fi
+    sleep 0.1
+  done
+}
+
+ask() { # ask PROMPT PLACEHOLDER [rofi args...] -> prints what was typed; fails on Esc
+  local prompt=$1 placeholder=${2//\"/\\\"}
+  shift 2
+  center >/dev/null 2>&1 &
+  rofi -dmenu -normal-window -theme "$theme" -m primary -l 0 -p "$prompt" \
+    -theme-str "entry { placeholder: \"$placeholder\"; }" \
+    -mesg "${ask_mesg:-<b>Enter</b> confirmar      <b>Esc</b> cancelar}" "$@" < /dev/null
+}
+
+remember() { # put NAME at the top of the recently-used list
+  mkdir -p "${hist%/*}"
+  { printf '%s\n' "$1"; grep -Fxv -- "$1" "$hist" 2>/dev/null || true; } | head -n 50 > "$hist.tmp"
+  mv "$hist.tmp" "$hist"
+}
+
+free_name() { # trims slashes and prints NAME if it is valid and not taken; fails otherwise
+  local n
+  n=$(printf '%s' "$1" | sed 's|^/*||; s|/*$||')
+  case "/$n/" in
+    //) return 1 ;;
+    */../*|*/./*|*//*) notify "Nome inválido" "$n"; return 1 ;;
+  esac
+  if [ -e "$store/$n.gpg" ] || [ -d "$store/$n" ]; then
+    notify "Esse nome já existe" "$(pretty "$n"): escolha outro"
+    return 1
+  fi
+  printf '%s' "$n"
+}
+
+new_entry() { # asks only for name and password, then saves with `pass insert`
+  local name pw
+  name=$(ask "" "Nome (ex.: trabalho/sankhya)" -filter "${1:-}") || return 0
+  name=$(free_name "$name") || return 0
+  pw=$(ask "" "Senha para $(pretty "$name")" -password) || return 0
+  [ -n "$pw" ] || return 0
+  # password via stdin (never in argv); -e = single line, no retype prompt
+  if printf '%s\n' "$pw" | pass insert -e "$name" >/dev/null 2>&1; then
+    remember "$name"
+    notify "Senha salva" "$(pretty "$name")"
+  else
+    notify "Erro ao salvar a senha" "$(pretty "$name")"
+  fi
+}
+
+rename_entry() { # asks for the new name (prefilled with the current one) and runs `pass mv`
+  local old=$1 new
+  new=$(ask "" "Novo nome para $(pretty "$old")" -filter "$old") || return 0
+  [ "$(printf '%s' "$new" | sed 's|^/*||; s|/*$||')" != "$old" ] || return 0
+  new=$(free_name "$new") || return 0
+  if pass mv -- "$old" "$new" >/dev/null 2>&1 < /dev/null; then
+    remember "$new"
+    notify "Senha renomeada" "$(pretty "$old") → $(pretty "$new")"
+  else
+    notify "Erro ao renomear" "$(pretty "$old")"
+  fi
+}
+
+delete_entry() { # deletes only after the exact name is typed back
+  local name=$1 typed
+  typed=$(ask_mesg="Para apagar <b>$(esc "$name")</b> de vez, digite o nome exato      <b>Esc</b> cancelar" \
+    ask "" "Nome da senha") || return 0
+  if [ "$typed" != "$name" ] && [ "$typed" != "$(pretty "$name")" ]; then
+    notify "Nada foi apagado" "O nome digitado não confere com $(pretty "$name")"
+    return 0
+  fi
+  if pass rm -f -- "$name" >/dev/null 2>&1; then
+    notify "Senha apagada" "$(pretty "$name")"
+  else
+    notify "Erro ao apagar" "$(pretty "$name")"
+  fi
+}
+
+mapfile -t all < <(find "$store" -name '*.gpg' -printf '%P\n' 2>/dev/null | sed 's/\.gpg$//' | sort)
+# recently used first (only entries that still exist), then the rest alphabetically
+mapfile -t entries < <({ cat "$hist" 2>/dev/null || true; printf '%s\n' "${all[@]}"; } |
+  awk 'NF && !seen[$0]++' | grep -Fx -f <(printf '%s\n' "${all[@]}"))
+
+help="<b>Enter</b> colar    <b>Alt+C</b> copiar    <b>Esc</b> fechar"$'\n'
+help+="<b>Alt+N</b> nova    <b>Alt+R</b> renomear    <b>Alt+D</b> apagar"
+set +e
+out=$({ center >/dev/null 2>&1 &
+        for e in "${entries[@]}"; do printf '   %s\n' "$(pretty "$e")"; done
+        printf '   Nova senha…\n'; } |
+  rofi -dmenu -normal-window -theme "$theme" -p "" -m primary \
+    -i -matching fuzzy -sort -sorting-method fzf -no-custom -format 'i|f' \
+    -kb-custom-1 Alt+c -kb-custom-2 Alt+n -kb-custom-3 Alt+r -kb-custom-4 Alt+d -mesg "$help")
+rc=$?
+set -e
+idx=${out%%|*}
+if [ "$rc" -eq 11 ]; then new_entry "${out#*|}"; exit 0; fi # Alt+N: typed search text = name
+case $rc in 0|10|12|13) ;; *) exit 0 ;; esac
+[ -n "$idx" ] && [ "$idx" -ge 0 ] || exit 0
+if [ "$idx" -ge ${#entries[@]} ]; then # the "Nova senha…" row
+  [ "$rc" -ne 0 ] || new_entry
+  exit 0
+fi
+entry=${entries[$idx]}
+case $rc in
+  12) rename_entry "$entry"; exit 0 ;;
+  13) delete_entry "$entry"; exit 0 ;;
+  10) mode=copy ;;
+  *) mode=paste ;;
+esac
+remember "$entry"
+
+pw=$(pass show "$entry" | head -n1)
+[ -n "$pw" ] || exit 1
+
+# the password goes through stdin so it never shows up in the process list.
+# Both selections get it: Shift+Insert pastes CLIPBOARD in most apps but PRIMARY in kitty.
+printf %s "$pw" | wl-copy
+printf %s "$pw" | wl-copy --primary
+
+if [ "$mode" = copy ]; then
+  notify "Senha copiada" "$(pretty "$entry") · cole com Ctrl+V · limpa em ${clear_after}s"
+else
+  sleep 0.3 # let rofi release the keyboard and focus return to the target window
+  # Wayland has no XSendEvent/xdotool for native windows; Mutter's RemoteDesktop D-Bus API injects
+  # keys into the focused window without a prompt. Shift+Insert works in terminals and GUI apps alike
+  # (Ctrl+V vs Ctrl+Shift+V would need the focused window's class, which Wayland hides).
+  python3 -I - <<'EOF' || notify "Senha copiada" "$(pretty "$entry") · não consegui colar, use Ctrl+V"
+import gi
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib
+bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+N, S = "org.gnome.Mutter.RemoteDesktop", "org.gnome.Mutter.RemoteDesktop.Session"
+def call(path, iface, method, args=None):
+    return bus.call_sync(N, path, iface, method, args, None, Gio.DBusCallFlags.NONE, 5000, None)
+session = call("/org/gnome/Mutter/RemoteDesktop", N, "CreateSession").unpack()[0]
+call(session, S, "Start")
+try:
+    for keysym, down in ((0xffe1, True), (0xff63, True), (0xff63, False), (0xffe1, False)):  # Shift_L, Insert
+        call(session, S, "NotifyKeyboardKeysym", GLib.Variant("(ub)", (keysym, down)))
+finally:
+    call(session, S, "Stop")
+EOF
+fi
+
+# wipe both selections later, but only if they still hold this password
+( sleep "$clear_after"
+  [ "$(wl-paste -n 2>/dev/null)" = "$pw" ] && wl-copy --clear
+  [ "$(wl-paste -n --primary 2>/dev/null)" = "$pw" ] && wl-copy --clear --primary ) >/dev/null 2>&1 &
+disown
