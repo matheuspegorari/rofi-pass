@@ -40,3 +40,7 @@ O tema `rofi-pass.rasi` fica na mesma pasta do script.
 
 - Rofi travou a tela: `pkill -x rofi`.
 - Não colou: a senha continua no clipboard, cole com Ctrl+V.
+
+## Licença
+
+[MIT](LICENSE)
