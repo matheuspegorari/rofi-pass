@@ -3,6 +3,8 @@
 Seletor de senhas do [`pass`](https://www.passwordstore.org/) no rofi para **GNOME/Wayland** (Ubuntu 24.04).
 Escolhe uma entrada, copia a senha (1ª linha) e cola no app em foco.
 
+![rofi-pass](screenshot.png)
+
 ## Uso
 
 | Tecla | Ação |
