@@ -1,12 +1,12 @@
-/* Theme for ~/.local/bin/rofi-pass: compact dark card in the GNOME Yaru-dark style. */
+/* Theme for ~/.local/bin/rofi-pass: compact dark card in the Catppuccin Mocha palette (mauve accent). */
 * {
-    bg:       #242424;
-    surface:  #333333;
-    line:     #ffffff1f;
-    fg:       #f6f6f6;
-    fg-dim:   #f6f6f68c;
-    accent:   #e95420;
-    on-accent: #ffffff;
+    bg:       #1e1e2e;
+    surface:  #313244;
+    line:     #45475a;
+    fg:       #cdd6f4;
+    fg-dim:   #a6adc8;
+    accent:   #cba6f7;
+    on-accent: #11111b;
 
     background-color: transparent;
     text-color: @fg;
